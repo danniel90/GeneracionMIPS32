@@ -1,0 +1,582 @@
+%decls %{
+#include <string>
+#include <map>
+
+using namespace std;
+
+extern map<string,int>::iterator iterador;
+extern map<string, int> tabla;
+
+static string vars = "";
+
+struct GenCodeRV {
+    string code;
+    string place;
+};
+
+struct GenCode {
+    string code;
+};
+
+string getRegister();
+string getLabel(string label);
+
+%}
+
+%{
+#include <iostream>
+#include <sstream>
+#include "expr_tree.h"
+
+//extern map<string, int> tabla;
+//map<string,int>::iterator iterador;
+map<string, int> etiquetas;
+%}
+
+%end %{
+
+string getRegister()
+{
+    ostringstream out;
+    static int count = 0;
+
+     if (count > 9) count = 0;
+    out << "$t" << count++;
+   
+    return out.str();
+}
+
+string getLabel(string label)
+{
+	ostringstream out;
+
+	if(etiquetas.count(label) == 0)
+		etiquetas[label] = 1;
+
+	int valor = etiquetas[label];
+	out << label << valor;
+        string etiquetaGenerada = out.str();
+	etiquetas[label] = valor + 1;
+        return etiquetaGenerada;
+}
+
+%}
+
+%option lang="C++"
+
+%node Expr %abstract %typedef
+
+%node BinaryExpr Expr %abstract = {
+	Expr *expr1;
+	Expr *expr2;
+}
+
+%node AddExpr BinaryExpr
+%node SubExpr BinaryExpr
+%node MultExpr BinaryExpr
+%node ModExpr BinaryExpr
+%node DivExpr BinaryExpr
+
+%node GreaterExpr BinaryExpr
+%node GreaterEqualExpr BinaryExpr
+%node LessExpr BinaryExpr
+%node LessEqualExpr BinaryExpr
+%node EqualExpr BinaryExpr
+%node NotEqualExpr BinaryExpr
+
+%node OrExpr BinaryExpr
+%node AndExpr BinaryExpr
+
+%node UnaryExpr Expr %abstract = {
+	Expr *expr;
+}
+
+%node NotExpr UnaryExpr
+
+%node NumExpr Expr = {
+	int value;
+}
+
+%node IdExpr Expr = {
+	string lexeme;
+}
+
+%operation %virtual int eval(Expr *this)
+%operation %virtual GenCodeRV gencode(Expr *this)
+
+eval(AddExpr),
+eval(SubExpr),
+eval(MultExpr),
+eval(ModExpr),
+eval(DivExpr),
+
+eval(GreaterExpr),
+eval(GreaterEqualExpr),
+eval(LessExpr),
+eval(LessEqualExpr),
+eval(EqualExpr),
+eval(NotEqualExpr),
+
+eval(AndExpr),
+eval(OrExpr) {
+	int v1 = expr1->eval();
+	int v2 = expr2->eval();
+	
+        switch (getKind()) {
+            case AddExpr_kind:		return v1+v2;
+            case SubExpr_kind:		return v1-v2;
+            case MultExpr_kind:		return v1*v2;
+            case ModExpr_kind:		return v1%v2;
+            case DivExpr_kind:		return v1/v2;
+
+            case GreaterExpr_kind:	return v1>v2;
+            case GreaterEqualExpr_kind: return v1>=v2;
+            case LessExpr_kind: 	return v1<v2;
+            case LessEqualExpr_kind:	return v1<=v2;
+            case EqualExpr_kind:	return v1==v2;
+            case NotEqualExpr_kind:	return v1!=v2;
+
+            case AndExpr_kind:		return v1&&v2;
+            case OrExpr_kind:		return v1||v2;
+            default:
+                    break;
+        }
+	return 0;
+}
+
+eval(NotExpr) {
+    int v = expr->eval();
+    return !v;
+}
+
+eval(NumExpr) {
+    return value;
+}
+
+eval(IdExpr) {
+    return tabla[lexeme];
+}
+
+gencode(AddExpr),
+gencode(SubExpr),
+gencode(MultExpr),
+gencode(DivExpr),
+gencode(ModExpr),
+
+gencode(GreaterExpr),
+gencode(GreaterEqualExpr),
+gencode(LessExpr),
+gencode(LessEqualExpr),
+gencode(EqualExpr),
+gencode(NotEqualExpr),
+
+gencode(AndExpr),
+gencode(OrExpr) {
+    GenCodeRV r1 = expr1->gencode();
+    GenCodeRV r2 = expr2->gencode();
+    GenCodeRV result;
+
+    switch (getKind()) {
+        case AddExpr_kind: {
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#AddExpr\n" +
+				"add " + result.place + ", " + r1.place + ", " + r2.place + "\n";
+             break;
+        }
+        case SubExpr_kind: {
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#SubExpr\n" +
+				"sub " + result.place + ", " + r1.place + ", " + r2.place + "\n";
+             break;
+        }
+        case MultExpr_kind: {
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#MultExpr\n" +
+				"mult " + result.place + ", " + r1.place + ", " + r2.place + "\n";
+             break;
+        }
+        case DivExpr_kind: {
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#DivExpr\n" +
+				"div " + r1.place + ", " + r2.place + "\n" +
+				"mfhi " + result.place + "\n";
+             break;
+        }
+        case ModExpr_kind: {
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#ModExpr\n" +
+				"div " + r1.place + ", " + r2.place + "\n" +
+				"mflo " + result.place + "\n";
+             break;
+        }
+
+
+        case GreaterExpr_kind: {
+	     string gt = getLabel("GT");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#GreaterExpr\n" +
+				"bgt " + r1.place + ", " + r2.place + ", " + gt + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end +"\n" +
+				gt + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+        case GreaterEqualExpr_kind: {
+	     string gte = getLabel("GTE");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#GreaterEqualExpr\n" +
+				"bge " + r1.place + ", " + r2.place + ", " + gte + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+				gte + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+	case LessExpr_kind: {
+	     string lt = getLabel("LT");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#LessExpr\n" +
+				"blt " + r1.place + ", " + r2.place + ", " + lt + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+				lt + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+	case LessEqualExpr_kind: {
+	     string lte = getLabel("LTE");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#LessEqualExpr\n" +
+				"ble " + r1.place + ", " + r2.place + ", " + lte + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+				lte + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+	case EqualExpr_kind: {
+	     string eq = getLabel("EQ");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#EqualExpr\n" +
+				"beq " + r1.place + ", " + r2.place + ", " + eq + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+				eq + ":\n" +
+				"li " + result.place + ", 1\n";
+             break;
+        }
+	case NotEqualExpr_kind: {
+	     string neq = getLabel("NEQ");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#NotEqualExpr\n" +
+				"bne " + r1.place + ", " + r2.place + ", " + neq + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+				neq + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+
+
+	case OrExpr_kind: {
+	     string truel = getLabel("TRUE");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#OrExpr\n" +
+				"bne " + r1.place + ", " + "$zero" + ", " + truel + "\n" +
+				"bne " + r2.place + ", " + "$zero" + ", " + truel + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+				truel + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+	case AndExpr_kind: {
+	     string truel = getLabel("TRUE");
+	     string andl = getLabel("AND");
+	     string end = getLabel("Fin");
+
+             result.place = getRegister();
+             result.code =	r1.code +
+				r2.code +
+				"#AndExpr\n" +
+				"bne " + r1.place + ", " + "$zero" + ", " + truel + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+       				truel + ":\n" +
+				"bne " + r2.place + ", " + "$zero" + ", " + andl + "\n" +
+				"li " + result.place + ", 0\n" +
+				"j " + end + "\n" +
+       				andl + ":\n" +
+				"li " + result.place + ", 1\n" +
+				end + ":\n";
+             break;
+        }
+
+        default:
+                break;
+    }
+
+    return result;
+}
+
+gencode(NotExpr) {
+    GenCodeRV r = expr->gencode();
+    GenCodeRV result;
+
+    string truel = getLabel("TRUE");
+    string end = getLabel("Fin");
+
+    result.place = getRegister();
+    result.code =	r.code +
+			"#NotExpr\n" +
+			"bne " + r.place + ", " + "$zero" + ", " + truel + "\n" +
+			"li " + result.place + ", 0\n" +
+			"j " + end + "\n" +
+       			truel + ":\n" +
+			"li " + result.place + ", 1\n" +
+			end + ":\n";
+    return result;
+}
+
+gencode(NumExpr) {
+    GenCodeRV result;
+    ostringstream out;
+
+    result.place = getRegister();
+
+    out << "#NumExpr" << endl
+	<< "li "<< result.place << ", " << value << endl;
+    result.code = out.str();
+
+    return result;
+}
+
+gencode(IdExpr) {
+	ostringstream out;
+	GenCodeRV result;
+
+	result.place = getRegister();
+
+	string tmp = getRegister();
+	out	<< "#IdExpr" << endl
+		<< "la " << tmp << ", " << lexeme << endl
+		<< "lw " << result.place << ", (" << tmp << ")" << endl;
+
+//	result.code =  "la " + result.place + ", " + lexeme + "\n";
+	result.code = out.str();
+	return result;
+}
+
+
+
+/*---------------------------------------------------------------------------------------------------
+					Sentences
+---------------------------------------------------------------------------------------------------*/
+
+%node Sentence %abstract %typedef
+
+%node Program Sentence = {
+	Sentence *p_sentences;
+}
+
+%node SequenceSent Sentence = {
+	Sentence *sent1;
+	Sentence *sent2;
+}
+
+%node AssignSent Sentence = {
+	IdExpr *id;
+	Expr *value;
+}
+
+%node IfSent Sentence = {
+	Expr *cond;
+	Sentence *trueBlock;
+	Sentence *falseBlock;
+}
+
+%node PrintSent Sentence = {
+	IdExpr *id;
+}
+
+%operation %virtual void interpret(Sentence *this)
+
+interpret(Program){
+	p_sentences->interpret();
+}
+
+interpret(SequenceSent){
+	if (sent1 != NULL) sent1->interpret();
+	if (sent2 != NULL) sent2->interpret();
+}
+
+interpret(AssignSent){
+	int val = value->eval();
+	tabla[id->lexeme] = val;
+}
+
+interpret(IfSent){
+	int val = cond->eval();
+	if (val > 0){
+		if (trueBlock != NULL) trueBlock->interpret();
+	} else {
+		if (falseBlock != NULL) falseBlock->interpret();
+	}
+}
+
+interpret(PrintSent){
+	cout << tabla[id->lexeme] << endl;
+}
+
+%operation %virtual GenCode genprogramcode(Sentence *this)
+
+genprogramcode(Program){
+	ostringstream out;
+	
+	GenCode p = p_sentences->genprogramcode();
+	GenCode result;
+	
+	out	<< "#MIPS32 PROGRAM" << endl << endl
+		<< ".data" << endl;
+	for(iterador = tabla.begin(); iterador != tabla.end(); iterador++){
+		out << (*iterador).first << ": .word 0" << endl;
+	}
+	out	<< endl
+		<< ".text" << endl
+		<< p.code << endl;
+
+	result.code = out.str();
+	return result;
+}
+
+genprogramcode(SequenceSent){
+	GenCode r2;
+	GenCode r1;
+
+	GenCode result;
+	
+	if (sent1 != NULL){
+		r1 = sent1->genprogramcode();
+		result.code.append(r1.code);
+		result.code.append("\n");
+	}
+	if (sent2 != NULL){
+		r2 = sent2->genprogramcode();
+		result.code.append(r2.code);
+		result.code.append("\n");
+	}
+	return result;
+}
+
+genprogramcode(AssignSent){
+	tabla[id->lexeme] = 0;
+	GenCodeRV r1 = id->gencode();
+	GenCodeRV val = value->gencode();
+	
+	GenCode result;
+	ostringstream out;
+
+	out	<< "#-------AssignSentence-------" << endl
+		<< r1.code
+		<< val.code
+		<< "add " << r1.place << ", $zero, " << val.place << "\n"
+		<< "sw " << r1.place << ", " << id->lexeme << endl;
+		 
+	result.code = out.str();
+
+	return result;
+}
+
+genprogramcode(IfSent){
+	GenCode result;
+	ostringstream out;
+	string falsel = getLabel("FALSE");
+	string end = getLabel("Fin");
+
+	GenCodeRV rCond = cond->gencode();
+	GenCode rTrue;
+	GenCode rFalse;
+
+	if (trueBlock != NULL) rTrue = trueBlock->genprogramcode();
+	else rTrue.code = "";
+
+	if (falseBlock != NULL) rFalse = falseBlock->genprogramcode();
+	else rFalse.code = "";
+
+	out	<< "#-------IfSentence-------" << endl
+		<< rCond.code
+		<< "beq " << rCond.place << ", $zero, " << falsel << endl
+		<< "#IfSentence True Block" << endl
+		<< rTrue.code
+		<< "j " << end << endl
+		<< "#IfSentence False Block" << endl
+		<< falsel << ":" << endl
+		<< rFalse.code << endl
+		<< end << ":" << endl;
+	result.code = out.str();
+	return result;
+}
+
+genprogramcode(PrintSent){
+	GenCode result;
+	GenCodeRV rid = id->gencode();
+
+	ostringstream out;
+	out	<< "#-------PrintSentence-------" << endl
+		<< rid.code
+		<< "move $a0, " << rid.place << endl
+		<< "li $v0, 1" << endl
+		<< "syscall" << endl;
+	
+	result.code = out.str();
+	return result;
+}
+
+
+
+

@@ -1,0 +1,10 @@
+tmp = 1;
+
+IF tmp THEN
+	tmp = 2;
+	PRINT tmp;
+ELSE
+	tmp = 0;
+ENDIF
+
+
